@@ -7,6 +7,7 @@ Integrates memory analysis, process scanning, and malware detection
 import sys
 import os
 import json
+import csv
 import hashlib
 import struct
 import gzip
@@ -576,10 +577,16 @@ class MainWindow(QMainWindow):
         control_layout = QHBoxLayout()
         carve_btn = QPushButton("Start Carving")
         carve_btn.clicked.connect(self.start_carving)
+        preview_btn = QPushButton("Preview Selected")
+        preview_btn.clicked.connect(self.preview_carved_file)
         recover_btn = QPushButton("Recover Selected")
         recover_btn.clicked.connect(self.recover_carved_files)
+        export_btn = QPushButton("Export List")
+        export_btn.clicked.connect(self.export_carved_files)
         control_layout.addWidget(carve_btn)
+        control_layout.addWidget(preview_btn)
         control_layout.addWidget(recover_btn)
+        control_layout.addWidget(export_btn)
         layout.addLayout(control_layout)
 
         # Progress
@@ -968,7 +975,8 @@ Total: {len(findings)}"""
             return
 
         self.carved_files_table.setRowCount(0)
-        scarver = FileScarver()
+        self.scarver = FileScarver()  # Store scarver for recovery
+        self.carving_source_file = file_path  # Store source file
 
         def progress_callback(progress, message):
             self.carving_progress.setValue(progress)
@@ -976,7 +984,8 @@ Total: {len(findings)}"""
 
         try:
             self.carving_label.setText("Carving in progress...")
-            files = scarver.carve_from_file(file_path, selected_types, progress_callback)
+            files = self.scarver.carve_from_file(file_path, selected_types, progress_callback)
+            self.carved_files_list = files  # Store for recovery
 
             # Populate table
             for file_info in files:
@@ -994,6 +1003,49 @@ Total: {len(findings)}"""
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+    def preview_carved_file(self):
+        """Preview selected carved file"""
+        selected_rows = self.carved_files_table.selectedIndexes()
+        if not selected_rows:
+            QMessageBox.warning(self, "Error", "Please select a file to preview")
+            return
+
+        row = selected_rows[0].row()
+        if not hasattr(self, 'carved_files_list') or row >= len(self.carved_files_list):
+            QMessageBox.warning(self, "Error", "File data not available")
+            return
+
+        file_info = self.carved_files_list[row]
+        
+        try:
+            with open(self.carving_source_file, 'rb') as f:
+                f.seek(file_info['offset'])
+                data = f.read(min(file_info['size'], 1024))  # First 1KB
+            
+            # Show preview
+            preview_text = f"File Type: {file_info['type']}\n"
+            preview_text += f"Offset: {hex(file_info['offset'])}\n"
+            preview_text += f"Size: {file_info['size']} bytes\n"
+            preview_text += f"MD5: {file_info['hash_md5']}\n"
+            preview_text += f"Confidence: {file_info['confidence']:.2f}\n"
+            preview_text += f"\nHex Preview (first 1KB):\n"
+            preview_text += data.hex()
+            
+            # Create preview dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Preview: {file_info['type']} at {hex(file_info['offset'])}")
+            dialog.setGeometry(100, 100, 800, 600)
+            layout = QVBoxLayout()
+            text_edit = QPlainTextEdit()
+            text_edit.setPlainText(preview_text)
+            text_edit.setReadOnly(True)
+            layout.addWidget(text_edit)
+            dialog.setLayout(layout)
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Preview failed: {str(e)}")
+
     def recover_carved_files(self):
         """Recover selected carved files"""
         if self.carved_files_table.rowCount() == 0:
@@ -1004,11 +1056,54 @@ Total: {len(findings)}"""
         if not output_dir:
             return
 
-        # This is a simplified recovery - in production would need full file_info
-        QMessageBox.information(
-            self, "Recovery",
-            f"Would recover files to {output_dir}\n(Requires full carving data)"
+        if not hasattr(self, 'carved_files_list') or not hasattr(self, 'carving_source_file'):
+            QMessageBox.warning(self, "Error", "Carving data not available")
+            return
+
+        def progress_callback(progress, message):
+            self.carving_progress.setValue(progress)
+            self.carving_label.setText(message)
+
+        try:
+            self.carving_label.setText("Recovering files...")
+            self.scarver.recover_carved_files(
+                self.carving_source_file,
+                self.carved_files_list,
+                output_dir,
+                progress_callback
+            )
+            self.carving_label.setText(f"Recovery complete: {len(self.carved_files_list)} files recovered")
+            QMessageBox.information(self, "Success", f"Files recovered to {output_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def export_carved_files(self):
+        """Export carved files list to JSON or CSV"""
+        if not hasattr(self, 'carved_files_list') or not self.carved_files_list:
+            QMessageBox.warning(self, "Error", "No carved files to export")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Carved Files List", "carved_files.json",
+            "JSON Files (*.json);;CSV Files (*.csv)"
         )
+        
+        if not path:
+            return
+
+        try:
+            if path.endswith('.csv'):
+                with open(path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=['type', 'offset', 'size', 'hash_md5', 'confidence', 'header'])
+                    writer.writeheader()
+                    writer.writerows(self.carved_files_list)
+            else:
+                with open(path, 'w') as f:
+                    json.dump(self.carved_files_list, f, indent=2)
+            
+            QMessageBox.information(self, "Success", f"Exported to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     # Unallocated space scanner handlers
     def browse_unalloc_file(self):
