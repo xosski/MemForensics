@@ -34,6 +34,7 @@ from memory_dumper import MemoryDumper
 from file_carver import FileScarver, FileType
 from unallocated_scanner import UnallocatedScanner
 from system_scanner import SystemScanner, ThreatSeverity
+from shellcode_detector import ShellcodeDetector, ShellcodeType, Architecture
 
 
 class MemoryReader:
@@ -324,7 +325,10 @@ class MainWindow(QMainWindow):
         # Tab 6: Signature Scanning
         tabs.addTab(self.create_signature_scanning_tab(), "Signature Scanning")
 
-        # Tab 7: System Health
+        # Tab 7: Shellcode Detection
+        tabs.addTab(self.create_shellcode_detection_tab(), "Shellcode Detection")
+
+        # Tab 8: System Health
         tabs.addTab(self.create_system_health_tab(), "System Health")
 
         layout.addWidget(tabs)
@@ -493,6 +497,79 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Scan Results:"))
         self.scan_results = QListWidget()
         layout.addWidget(self.scan_results)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_shellcode_detection_tab(self) -> QWidget:
+        """Create shellcode detection and analysis tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # File selection
+        file_layout = QHBoxLayout()
+        file_label = QLabel("Memory/Binary File:")
+        self.shellcode_file_input = QLineEdit()
+        self.shellcode_file_input.setPlaceholderText("Select file to analyze...")
+        shellcode_browse_btn = QPushButton("Browse")
+        shellcode_browse_btn.clicked.connect(self.browse_shellcode_file)
+        file_layout.addWidget(file_label)
+        file_layout.addWidget(self.shellcode_file_input)
+        file_layout.addWidget(shellcode_browse_btn)
+        layout.addLayout(file_layout)
+
+        # Analysis options
+        options_layout = QHBoxLayout()
+        self.shellcode_extract_candidates = QCheckBox("Extract Shellcode Candidates")
+        self.shellcode_extract_candidates.setChecked(True)
+        self.shellcode_auto_classify = QCheckBox("Auto-Classify Shellcode Type")
+        self.shellcode_auto_classify.setChecked(True)
+        options_layout.addWidget(self.shellcode_extract_candidates)
+        options_layout.addWidget(self.shellcode_auto_classify)
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+
+        # Analyze button
+        analyze_btn = QPushButton("Analyze for Shellcode")
+        analyze_btn.clicked.connect(self.analyze_shellcode)
+        layout.addWidget(analyze_btn)
+
+        # Progress
+        self.shellcode_progress = QProgressBar()
+        self.shellcode_label = QLabel("Ready")
+        layout.addWidget(QLabel("Progress:"))
+        layout.addWidget(self.shellcode_progress)
+        layout.addWidget(self.shellcode_label)
+
+        # Detections table
+        layout.addWidget(QLabel("Shellcode Detections:"))
+        self.shellcode_detections_table = QTableWidget()
+        self.shellcode_detections_table.setColumnCount(6)
+        self.shellcode_detections_table.setHorizontalHeaderLabels(
+            ['Offset', 'Type', 'Size', 'Threat Level', 'Category', 'Description']
+        )
+        self.shellcode_detections_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.Stretch
+        )
+        layout.addWidget(self.shellcode_detections_table)
+
+        # Summary panel
+        layout.addWidget(QLabel("Analysis Summary:"))
+        self.shellcode_summary = QTextEdit()
+        self.shellcode_summary.setReadOnly(True)
+        self.shellcode_summary.setMaximumHeight(150)
+        layout.addWidget(self.shellcode_summary)
+
+        # Export buttons
+        export_layout = QHBoxLayout()
+        export_report_btn = QPushButton("Export Report")
+        export_report_btn.clicked.connect(self.export_shellcode_report)
+        export_json_btn = QPushButton("Export JSON")
+        export_json_btn.clicked.connect(self.export_shellcode_json)
+        export_layout.addWidget(export_report_btn)
+        export_layout.addWidget(export_json_btn)
+        export_layout.addStretch()
+        layout.addLayout(export_layout)
 
         widget.setLayout(layout)
         return widget
@@ -1149,6 +1226,187 @@ Total: {len(findings)}"""
             self.unalloc_label.setText(f"Scan complete: {len(findings)} artifacts found")
             QMessageBox.information(self, "Success", f"Found {len(findings)} artifacts")
 
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+
+    # Shellcode detection handlers
+    def browse_shellcode_file(self):
+        """Browse for file to analyze for shellcode"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select File to Analyze for Shellcode"
+        )
+        if path:
+            self.shellcode_file_input.setText(path)
+
+    def analyze_shellcode(self):
+        """Analyze file for shellcode"""
+        file_path = self.shellcode_file_input.text()
+        if not file_path or not os.path.exists(file_path):
+            QMessageBox.warning(self, "Error", "Please select valid file")
+            return
+
+        self.shellcode_detections_table.setRowCount(0)
+        detector = ShellcodeDetector()
+
+        try:
+            self.shellcode_label.setText("Reading file...")
+            with open(file_path, 'rb') as f:
+                data = f.read()
+
+            self.shellcode_label.setText("Analyzing for shellcode...")
+            
+            # Detect shellcode
+            detections = detector.detect_shellcode(data)
+            
+            # Extract candidates if requested
+            candidates = []
+            if self.shellcode_extract_candidates.isChecked():
+                self.shellcode_label.setText("Extracting shellcode candidates...")
+                candidates = detector.extract_shellcode_candidates(data)
+
+            # Populate table
+            for i, detection in enumerate(detections):
+                row = self.shellcode_detections_table.rowCount()
+                self.shellcode_detections_table.insertRow(row)
+                
+                offset = detection.get('offset', 0)
+                det_type = detection.get('type', 'unknown')
+                size = detection.get('size', 0)
+                threat = detection.get('threat_level', 'MEDIUM')
+                category = detection.get('category', detection.get('pattern', 'N/A'))
+                desc = detection.get('description', '')
+
+                self.shellcode_detections_table.setItem(row, 0, QTableWidgetItem(hex(offset)))
+                self.shellcode_detections_table.setItem(row, 1, QTableWidgetItem(det_type))
+                self.shellcode_detections_table.setItem(row, 2, QTableWidgetItem(str(size)))
+                self.shellcode_detections_table.setItem(row, 3, QTableWidgetItem(threat))
+                self.shellcode_detections_table.setItem(row, 4, QTableWidgetItem(str(category)))
+                self.shellcode_detections_table.setItem(row, 5, QTableWidgetItem(desc))
+
+                # Color code by threat level
+                threat_colors = {
+                    'CRITICAL': QColor(255, 0, 0),
+                    'HIGH': QColor(255, 128, 0),
+                    'MEDIUM': QColor(255, 255, 0),
+                    'LOW': QColor(128, 128, 255),
+                }
+                color = threat_colors.get(threat, QColor(200, 200, 200))
+                for col in range(self.shellcode_detections_table.columnCount()):
+                    item = self.shellcode_detections_table.item(row, col)
+                    if item:
+                        item.setBackground(color)
+
+            # Generate summary
+            summary = f"""Analysis Summary:
+Total Detections: {len(detections)}
+Shellcode Candidates Extracted: {len(candidates)}
+
+Threat Levels:
+  Critical: {sum(1 for d in detections if d.get('threat_level') == 'CRITICAL')}
+  High: {sum(1 for d in detections if d.get('threat_level') == 'HIGH')}
+  Medium: {sum(1 for d in detections if d.get('threat_level') == 'MEDIUM')}
+  Low: {sum(1 for d in detections if d.get('threat_level') == 'LOW')}
+
+"""
+            
+            # Auto-classify if requested
+            if self.shellcode_auto_classify.isChecked() and len(data) > 0:
+                try:
+                    analysis = detector.analyze_shellcode_region(data)
+                    classification = detector.classify_shellcode(data)
+                    summary += f"""Shellcode Classification:
+Type: {classification['type']}
+Confidence: {classification['confidence']}%
+Architecture: {classification['architecture']}
+Entropy: {classification['entropy']}
+"""
+                except:
+                    pass
+
+            self.shellcode_summary.setText(summary)
+            self.shellcode_label.setText(
+                f"Analysis complete: {len(detections)} detections found"
+            )
+            
+            # Store for export
+            self.shellcode_detections = detections
+            self.shellcode_candidates = candidates
+
+            QMessageBox.information(
+                self, "Success",
+                f"Found {len(detections)} shellcode indicators"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Analysis failed: {str(e)}")
+
+    def export_shellcode_report(self):
+        """Export shellcode analysis report"""
+        if not hasattr(self, 'shellcode_detections') or not self.shellcode_detections:
+            QMessageBox.warning(self, "Error", "No detections to export")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Report", "shellcode_report.txt",
+            "Text Files (*.txt)"
+        )
+        if not path:
+            return
+
+        try:
+            detector = ShellcodeDetector()
+            report = detector.generate_report({
+                'base_address': '0x0',
+                'size': len(open(self.shellcode_file_input.text(), 'rb').read()),
+                'md5': 'N/A',
+                'sha256': 'N/A',
+                'entropy': 0.0,
+                'architecture': 'unknown',
+                'detections': self.shellcode_detections,
+                'suspicious': len(self.shellcode_detections) > 0,
+            })
+
+            with open(path, 'w') as f:
+                f.write(report)
+                f.write("\n\nDETAILED DETECTIONS:\n")
+                f.write("=" * 70 + "\n")
+                for det in self.shellcode_detections:
+                    f.write(f"\nOffset: {hex(det.get('offset', 0))}\n")
+                    f.write(f"Type: {det.get('type', 'Unknown')}\n")
+                    f.write(f"Threat Level: {det.get('threat_level', 'Unknown')}\n")
+                    f.write(f"Description: {det.get('description', 'N/A')}\n")
+
+            QMessageBox.information(self, "Success", f"Report exported to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def export_shellcode_json(self):
+        """Export shellcode detections as JSON"""
+        if not hasattr(self, 'shellcode_detections') or not self.shellcode_detections:
+            QMessageBox.warning(self, "Error", "No detections to export")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save JSON", "shellcode_detections.json",
+            "JSON Files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            export_data = {
+                'file': self.shellcode_file_input.text(),
+                'analysis_time': datetime.now().isoformat(),
+                'total_detections': len(self.shellcode_detections),
+                'detections': self.shellcode_detections,
+                'candidates': getattr(self, 'shellcode_candidates', [])
+            }
+
+            with open(path, 'w') as f:
+                json.dump(export_data, f, indent=2)
+
+            QMessageBox.information(self, "Success", f"JSON exported to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 

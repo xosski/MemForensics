@@ -70,7 +70,17 @@ Malware pattern detection:
 - Code cave detection
 - Embedded executable detection
 
-### 7. System Health Monitoring
+### 7. Advanced Shellcode Detection
+Comprehensive shellcode analysis and exploitation artifact detection:
+- **Signature-based detection**: Known shellcode patterns (x86/x64 syscalls, NOP sleds, stack pivots)
+- **Heuristic analysis**: Function prologues, high-entropy regions, code caves
+- **Known payloads**: Meterpreter, reverse shells, mimikatz, PowerShell exploits
+- **Classification**: Identify shellcode type (bind/reverse shell, downloader, privilege escalation)
+- **Candidate extraction**: Locate potential code injection sites
+- **Architecture detection**: x86, x64, ARM architecture identification
+- **Detailed reporting**: Export findings as text reports or JSON
+
+### 8. System Health Monitoring
 - CPU usage and core count
 - Memory statistics
 - Disk usage metrics
@@ -184,12 +194,30 @@ sudo python3 main.py  # Required for memory access
 2. Click **Refresh Process List** to enumerate processes
 3. Select process from table to view details
 4. Details show:
-   - Memory usage
-   - Open files
-   - Network connections
-   - Threads
-   - Children
+    - Memory usage
+    - Open files
+    - Network connections
+    - Threads
+    - Children
 5. Click **Scan for Suspicious** to detect anomalies
+
+### Shellcode Detection
+
+1. Open **Shellcode Detection** tab
+2. Click **Browse** to select memory dump or binary file
+3. Optional: Configure analysis options
+    - **Extract Shellcode Candidates**: Locate potential injection sites
+    - **Auto-Classify Shellcode Type**: Identify exploit type
+4. Click **Analyze for Shellcode**
+5. Review detections table:
+    - Offset: Location in file
+    - Type: Detection method (signature, heuristic, known_payload)
+    - Size: Bytes matched
+    - Threat Level: CRITICAL/HIGH/MEDIUM/LOW
+    - Category: Signature category (syscall, socket, etc.)
+    - Description: Detailed description
+6. Summary panel shows statistics and classification
+7. Export as text report or JSON for further analysis
 
 ### Signature Scanning
 
@@ -318,6 +346,14 @@ Unauthorized access to computer systems is illegal.
 - `scan_for_patterns()` - Signature matching
 - `detect_anomalies()` - Behavioral analysis
 - `analyze_memory_region()` - Comprehensive analysis
+
+### shellcode_detector.py
+`ShellcodeDetector` class - Advanced shellcode analysis
+- `detect_shellcode()` - Comprehensive shellcode detection
+- `analyze_shellcode_region()` - Detailed region analysis
+- `classify_shellcode()` - Type and family classification
+- `extract_shellcode_candidates()` - Locate code injection sites
+- `generate_report()` - Human-readable reporting
 
 ### volatility_integration.py
 `VolatilityWrapper` class - Volatility3 integration
